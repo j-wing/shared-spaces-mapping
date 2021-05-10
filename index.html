@@ -105,7 +105,7 @@
         return s;
       }
       async function render() {
-        response = await fetch("/entries.json");
+        response = await fetch("entries.json");
         entries = await response.json();
         console.log(entries);
 
