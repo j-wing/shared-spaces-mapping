@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Discretionary Reviews!</title>
+    <style>
+      #map {
+        height: 100%;
+        margin-top: 10px;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+    <script type="text/javascript">
+      var prevWindow;
+      var map;
+      const GREEN_PIN =
+        "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
+      const BLUE_PIN = "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
+      const RED_PIN = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
+
+      function formatDate(date) {
+        if (date.length === 0) {
+          return "None yet.";
+        }
+        let d = new Date(date);
+        return `<b>${d.toLocaleDateString()}</b>`;
+      }
+
+      function formatLoc(loc) {
+        s = "";
+        if (loc.house_number) {
+          s += loc.house_number + " ";
+        }
+
+        s += loc.road;
+        return s;
+      }
+
+      function getIcon(entry) {
+        let url = RED_PIN;
+        if (
+          entry["sheet_value"][6] === "TRUE" ||
+          entry["sheet_value"][8] === "TRUE"
+        ) {
+          url = GREEN_PIN;
+        }
+
+        return { url: url };
+      }
+
+      function formatStatus(entry) {
+        let s = "";
+        if (entry.status == "DO_NOT_TAKE" && entry.approval == "APPROVE") {
+          s += "<b>Reject the DR and approve the project</b>";
+        } else if (
+          entry.status == "TAKE" &&
+          entry.approval == "APPROVE_WITH_MODS"
+        ) {
+          s += "<b>Approve the project with modifications</b>";
+        } else {
+          s = `<b>${entry.status} & ${entry.approval}</b>`;
+        }
+        return s;
+      }
+
+      function formatType(types) {
+        if (types.length === 0) {
+          return "(Unknown)";
+        }
+
+        return types
+          .map((val) => {
+            if (TYPES[val]) {
+              return TYPES[val];
+            } else {
+              return "(Unknown)";
+            }
+          })
+          .join(" + ");
+      }
+
+      function formatEntry(entry) {
+        s = `
+        <h2>${entry.sheet_value[0]} (${entry.sheet_value[1]})</h2>
+        <p>Reached the owner? ${entry.sheet_value[7]}</p>
+        <p>Put up window signs? ${entry.sheet_value[6]}</p>
+        <p>Put up business cards? ${entry.sheet_value[8]}</p>
+        `;
+        /* if (entry.type.indexOf("DRP") != -1) {
+          s += `
+        <p>Staff recommendation: ${formatStatus(entry)}</b></p>
+        <p><a target="_blank" href="${entry.full_url}">DR Packet</a></p>
+        <p>Hearing date: ${formatDate(entry.hearing_date)} (<b>${
+            entry.time_to_hearing
+          } days</b> after DR filed)</b></p>
+        `;
+        } else {
+          s += `<p>Hearing date: ${formatDate(entry.hearing_date)}</b></p>`;
+        } */
+        return s;
+      }
+      async function render() {
+        response = await fetch("/entries.json");
+        entries = await response.json();
+        console.log(entries);
+
+        const SF = { lat: 37.7661441, lng: -122.4398682 };
+        map = new google.maps.Map(document.getElementById("map"), {
+          zoom: 13.1,
+          center: SF,
+        });
+
+        let markers = [];
+        for (let [id, entry] of Object.entries(entries)) {
+          let lat, long;
+          if (!entry.location) {
+            console.log("skipping", entry);
+            continue;
+          }
+
+          if (entry.location.lat) {
+            lat = entry.location.lat;
+            long = entry.location.lng;
+          } else if (entry.location.geometry) {
+            lat = entry.location.geometry.location.lat;
+            long = entry.location.geometry.location.lng;
+          } else {
+            console.log("sipping", entry.location);
+            continue;
+          }
+
+          console.log({ lat: parseFloat(lat), lng: parseFloat(long) });
+          let m = new google.maps.Marker({
+            position: { lat: parseFloat(lat), lng: parseFloat(long) },
+            map: map,
+            icon: getIcon(entry),
+          });
+
+          let info = new google.maps.InfoWindow({
+            content: formatEntry(entry),
+            marker: m,
+          });
+
+          m.addListener("click", () => {
+            if (prevWindow) {
+              prevWindow.close();
+            }
+            prevWindow = info;
+            info.open(map, m);
+          });
+
+          markers.push({
+            marker: m,
+            info: info,
+            entry: entry,
+          });
+        }
+
+        let filters = document.getElementsByClassName("filter");
+        for (let filter of filters) {
+          filter.addEventListener("change", (e) => {
+            let name = e.target.name.toUpperCase();
+            let checked = e.target.checked;
+            for (let marker of markers) {
+              if (marker.entry.type.indexOf(name) == -1) {
+                continue;
+              }
+              console.log("matches", marker.entry, checked);
+              if (checked) {
+                marker.marker.setMap(map);
+              } else {
+                marker.marker.setMap(null);
+              }
+            }
+          });
+        }
+
+        document.getElementById("clear").addEventListener("click", (e) => {
+          for (let filter of document.getElementsByClassName("filter")) {
+            filter.checked = false;
+            for (let marker of markers) {
+              marker.marker.setMap(null);
+            }
+          }
+        });
+      }
+    </script>
+  </head>
+
+  <body>
+    <form class="form">
+      <label for="drp">DRs</label
+      ><input type="checkbox" name="drp" class="filter" checked />
+      <label for="cua">CUA</label
+      ><input type="checkbox" name="cua" class="filter" checked />
+      <label for="var">VAR</label
+      ><input type="checkbox" name="var" class="filter" checked />
+      <label for="coa">COA</label
+      ><input type="checkbox" name="coa" class="filter" checked />
+      <button type="button" id="clear">Clear</button>
+    </form>
+    <div id="map"></div>
+
+    <!-- Async script executes immediately and must be after any DOM elements used in callback. -->
+    <script
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAP0dv7_z7TczoNiwqqHOu1n4DYUb7KxDA&callback=render&libraries=&v=beta"
+      async
+    ></script>
+  </body>
+</html>
